@@ -1,6 +1,6 @@
 // src/app/how-it-works/page.tsx
 import React from "react";
-import Link from "next/link";
+//import Link from "next/link";
 import NavBar from "../../components/Navbar";
 
 function Step({ title, desc }: { title: string; desc: string }) {
@@ -216,8 +216,8 @@ export default function HowItWorksPage() {
               <strong>Hallucination mitigation</strong>: models can fabricate
               answers. Mitigations: (1) provide retrieved evidence snippets
               (will introduce soon), (2) instruct the model to refuse or say the
-              info isn't found, (3) apply conservative generation settings (low
-              temperature).
+              info isn&apos;t found, (3) apply conservative generation settings
+              (low temperature).
             </div>
 
             <div>
@@ -353,8 +353,8 @@ export default function HowItWorksPage() {
             <li>
               <strong>Top-K & thresholds:</strong> Start with{" "}
               <code>topK=8–10</code> and a heuristic threshold (e.g. similarity
-              &gt; 0.55) for "good matches"; fall back to keyword search if
-              semantic retrieval is weak.
+              &gt; 0.55) for &quot;good matches&quot;; fall back to keyword
+              search if semantic retrieval is weak.
             </li>
             {/* <li>
               <strong>Provenance:</strong> Always show source snippets + scores

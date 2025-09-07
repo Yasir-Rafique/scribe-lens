@@ -2,6 +2,8 @@
 import React, { useEffect, useRef, useState } from "react";
 import NavBar from "../components/Navbar";
 
+type ContextItem = { text?: string };
+
 type Message = {
   role: "user" | "ai";
   text: string;
@@ -153,7 +155,8 @@ export default function Home() {
     } else if (selectedPdfId) {
       startPollingStatus(selectedPdfId);
     }
-  }, [mounted]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mounted, embeddingStatus?.status, embeddingStatus?.pdfId, selectedPdfId]);
 
   // (avoid duplicates)
   const completedEmbToastRef = useRef<Set<string>>(new Set());
@@ -248,10 +251,13 @@ export default function Home() {
 
         // Read text first and attempt safe parse
         const text = await res.text();
-        let json: any = null;
+        let json: {
+          success?: boolean;
+          status?: Partial<EmbeddingStatus>;
+        } | null = null;
         try {
           json = text ? JSON.parse(text) : null;
-        } catch (e) {
+        } catch (_e) {
           json = null;
         }
 
@@ -518,7 +524,9 @@ export default function Home() {
       // --- AI message with cleaned sources ---
       const seen = new Set<string>();
       const sources = contexts
-        .map((c: any) => (c.text ?? c).trim())
+        .map((c: ContextItem | string) =>
+          (typeof c === "string" ? c : c.text ?? "").trim()
+        )
         .filter((txt: string): boolean => {
           if (!txt || seen.has(txt)) return false;
           seen.add(txt);
@@ -656,7 +664,7 @@ export default function Home() {
   };
 
   // small UI helper to remove an uploaded doc (optional soft remove)
-  const removeDocument = (pdfId: string) => {
+  const _removeDocument = (pdfId: string) => {
     if (
       !confirm(
         "Remove this PDF from the list? This will only remove it from the UI (server file remains)."

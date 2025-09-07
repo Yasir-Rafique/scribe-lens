@@ -6,8 +6,19 @@ import crypto from "crypto";
 import { mkdir, writeFile } from "fs/promises";
 import path from "path";
 
-function extractMetadata(text: string) {
-  const meta: Record<string, any> = {};
+interface PDFMetadata {
+  title?: string;
+  author?: string;
+  emails?: string[];
+  phones?: string[];
+  urls?: string[];
+  linkedin?: string;
+  github?: string;
+  skills?: string[];
+}
+
+function extractMetadata(text: string): PDFMetadata {
+  const meta: PDFMetadata = {};
   if (!text || typeof text !== "string") return meta;
 
   const head = text.slice(0, 1200);

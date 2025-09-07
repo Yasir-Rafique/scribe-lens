@@ -118,11 +118,11 @@ export async function POST(req: Request) {
     }
 
     return NextResponse.json({ success: true, pdfId, count: vectors.length });
-  } catch (err: any) {
+  } catch (err: unknown) {
     console.error("Embeddings error:", err);
     // if pdfId known, write error into status file (best-effort)
     try {
-      const pdfId = (err?.pdfId as string) ?? null;
+      const pdfId = (err as { pdfId?: string })?.pdfId ?? null;
       if (pdfId) {
         const statusPath = path.join(VECTOR_DIR, "status", `${pdfId}.json`);
         const tmpErr = statusPath + ".tmp";
@@ -134,7 +134,7 @@ export async function POST(req: Request) {
               total: 0,
               processed: 0,
               status: "error",
-              error: String(err?.message ?? err),
+              error: err instanceof Error ? err.message : String(err),
             },
             null,
             2
@@ -145,7 +145,10 @@ export async function POST(req: Request) {
       }
     } catch {}
     return NextResponse.json(
-      { success: false, error: String(err?.message ?? err) },
+      {
+        success: false,
+        error: err instanceof Error ? err.message : String(err),
+      },
       { status: 500 }
     );
   }

@@ -1,4 +1,4 @@
-// src/app/api/delete-pdf/route.ts
+// src/app/api/delete/route.ts
 import { NextResponse } from "next/server";
 import { unlink } from "fs/promises";
 import path from "path";
@@ -9,7 +9,7 @@ const METADATA_DIR = path.join(VECTOR_DIR, "metadata");
 
 export async function POST(req: Request) {
   try {
-    const { pdfId } = await req.json();
+    const { pdfId } = (await req.json()) as { pdfId: string };
 
     if (!pdfId) {
       return NextResponse.json(
@@ -31,8 +31,11 @@ export async function POST(req: Request) {
       try {
         await unlink(file);
         deleted.push(file);
-      } catch (err: any) {
-        if (err.code === "ENOENT") {
+      } catch (err: unknown) {
+        if (
+          (err as NodeJS.ErrnoException).code === "ENOENT" ||
+          (err as any).message?.includes("no such file or directory")
+        ) {
           notFound.push(file);
         } else {
           throw err;
@@ -47,10 +50,13 @@ export async function POST(req: Request) {
       notFound,
       message: "PDF data and vectors deleted permanently.",
     });
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error("❌ Delete API error:", error);
     return NextResponse.json(
-      { success: false, error: String(error?.message ?? error) },
+      {
+        success: false,
+        error: error instanceof Error ? error.message : String(error),
+      },
       { status: 500 }
     );
   }

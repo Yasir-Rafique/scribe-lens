@@ -4,6 +4,15 @@ import fs from "fs";
 import path from "path";
 import OpenAI from "openai";
 
+// Define the shape of a single vector entry
+interface VectorItem {
+  id?: string;
+  text: string;
+  embedding?: number[];
+  embeddings?: number[];
+  vector?: number[];
+}
+
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
 const VECTOR_DIR = path.join(process.cwd(), "vector");
@@ -69,15 +78,14 @@ export async function POST(req: Request) {
       );
     }
 
-    // 2) Load vectors for this PDF
+    // 2) Load vectors for this PDF and cast to the new, safe type
     const raw = fs.readFileSync(filePath, "utf-8");
-    const vectorData = JSON.parse(raw) as any[];
+    const vectorData = JSON.parse(raw) as VectorItem[];
 
     // 3) Score each vector (support both `embedding` and `embeddings` field names)
     const scored = vectorData
-      .map((item: any) => {
-        const vec: any =
-          item.embedding ?? item.embeddings ?? item.vector ?? null;
+      .map((item: VectorItem) => {
+        const vec = item.embedding ?? item.embeddings ?? item.vector ?? null;
         if (!Array.isArray(vec)) return null;
         const score = cosineSimilarity(queryEmbedding, vec);
         return {
@@ -92,10 +100,13 @@ export async function POST(req: Request) {
     const results = scored.sort((a, b) => b.score - a.score).slice(0, topK);
 
     return NextResponse.json({ success: true, results });
-  } catch (err: any) {
+  } catch (err: unknown) {
     console.error("Retrieve error:", err);
     return NextResponse.json(
-      { success: false, error: err?.message ?? String(err) },
+      {
+        success: false,
+        error: err instanceof Error ? err.message : String(err),
+      },
       { status: 500 }
     );
   }

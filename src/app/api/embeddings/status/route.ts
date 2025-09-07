@@ -63,10 +63,13 @@ export async function GET(req: Request) {
     // Ensure pdfId is present in the payload we return
     const status = { pdfId, ...parsed };
     return NextResponse.json({ success: true, status });
-  } catch (err: any) {
+  } catch (err: unknown) {
     console.error("Status error:", err);
     return NextResponse.json(
-      { success: false, error: String(err?.message ?? err) },
+      {
+        success: false,
+        error: err instanceof Error ? err.message : String(err),
+      },
       { status: 500 }
     );
   }

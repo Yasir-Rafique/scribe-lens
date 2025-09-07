@@ -6,7 +6,7 @@ export type VectorEntry = {
   id: string;
   embedding: number[]; // floats
   text: string;
-  meta?: Record<string, any>;
+  meta?: Record<string, unknown>;
 };
 
 const STORE_PATH = path.join(process.cwd(), "vectors.json");

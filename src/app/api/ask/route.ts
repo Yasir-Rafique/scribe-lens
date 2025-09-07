@@ -4,6 +4,13 @@ import fs from "fs";
 import path from "path";
 import OpenAI from "openai";
 
+interface VectorItem {
+  text: string;
+  embedding?: number[];
+  embeddings?: number[];
+  vector?: number[];
+}
+
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 const VECTOR_DIR = path.join(process.cwd(), "vector");
 
@@ -27,20 +34,22 @@ function safeSnippet(t: string, len = 800) {
   return t.replace(/\s+/g, " ").trim().slice(0, len);
 }
 
-function loadVectorsForPdf(pdfId: string) {
+// Function to load vector data with the new type
+function loadVectorsForPdf(pdfId: string): VectorItem[] | null {
   const filePath = path.join(VECTOR_DIR, `${pdfId}.json`);
   if (!fs.existsSync(filePath)) return null;
   const raw = fs.readFileSync(filePath, "utf-8");
-  return JSON.parse(raw) as any[];
+  return JSON.parse(raw) as VectorItem[];
 }
 
+// Function to load metadata with safe error handling
 function loadMetaForPdf(pdfId: string) {
   try {
     const metaPath = path.join(VECTOR_DIR, `${pdfId}.meta.json`);
     if (!fs.existsSync(metaPath)) return null;
     const raw = fs.readFileSync(metaPath, "utf-8");
     return JSON.parse(raw);
-  } catch (e) {
+  } catch {
     return null;
   }
 }
@@ -143,7 +152,7 @@ export async function POST(req: Request) {
         const qVec = embResp.data?.[0]?.embedding;
         if (Array.isArray(qVec)) {
           const scored = vectors
-            .map((item: any) => {
+            .map((item: VectorItem) => {
               const vec =
                 item.embedding ?? item.embeddings ?? item.vector ?? null;
               if (!Array.isArray(vec)) return null;
@@ -157,7 +166,7 @@ export async function POST(req: Request) {
           scored.sort((a, b) => b.score - a.score);
           contextEntries = scored.slice(0, Math.min(topK, scored.length));
         }
-      } catch (e) {
+      } catch (e: unknown) {
         console.warn("Primary retrieval (retrievalQuery) failed:", e);
       }
 
@@ -175,7 +184,7 @@ export async function POST(req: Request) {
           const qVec2 = embResp2.data?.[0]?.embedding;
           if (Array.isArray(qVec2)) {
             const scored2 = vectors
-              .map((item: any) => {
+              .map((item: VectorItem) => {
                 const vec =
                   item.embedding ?? item.embeddings ?? item.vector ?? null;
                 if (!Array.isArray(vec)) return null;
@@ -201,7 +210,7 @@ export async function POST(req: Request) {
               .sort((a, b) => b.score - a.score)
               .slice(0, Math.min(topK, Object.keys(merged).length));
           }
-        } catch (e) {
+        } catch (e: unknown) {
           console.warn("Backoff retrieval (original query) failed:", e);
         }
       }
@@ -296,10 +305,13 @@ export async function POST(req: Request) {
         : [];
 
     return NextResponse.json({ success: true, answer, context: contextOut });
-  } catch (err: any) {
+  } catch (err: unknown) {
     console.error("Error in /api/ask:", err);
     return NextResponse.json(
-      { success: false, error: err?.message ?? String(err) },
+      {
+        success: false,
+        error: err instanceof Error ? err.message : String(err),
+      },
       { status: 500 }
     );
   }

@@ -1,3 +1,4 @@
-declare module "pdfjs-dist/legacy/build/pdf.mjs" {
-  export * from "pdfjs-dist";
+declare module "pdf-parse/lib/pdf-parse.js" {
+  const pdf: (buffer: Buffer) => Promise<{ text: string }>;
+  export default pdf;
 }

@@ -70,13 +70,13 @@ export default function EthicsPage() {
               authoritative sources before acting.
             </li>
             <li>
-              Use the "remove" or "permanently delete" actions when you no
-              longer want a document retained by this app.
+              Use the &quot;remove&quot; or &quot;permanently delete&quot;
+              actions when you no longer want a document retained by this app.
             </li>
             <li>
-              If the assistant says it couldn't find an answer, try rephrasing
-              the question or ask about a narrower passage (e.g., a chapter or
-              heading).
+              If the assistant says it could&apos;t find an answer, try
+              rephrasing the question or ask about a narrower passage (e.g., a
+              chapter or heading).
             </li>
           </ol>
         </section>
