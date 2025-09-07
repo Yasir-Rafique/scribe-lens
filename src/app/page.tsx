@@ -261,11 +261,15 @@ export default function Home() {
         }
 
         if (json?.success && json.status) {
-          // Ensure pdfId is present in the status object
-          const statusObj = {
+          // json.status is already Partial<EmbeddingStatus>
+          const statusObj: EmbeddingStatus = {
             pdfId,
-            ...(json.status as any),
-          } as EmbeddingStatus;
+            total: json.status.total ?? 0,
+            processed: json.status.processed ?? 0,
+            status: json.status.status ?? "processing",
+            error: json.status.error ?? null,
+          };
+
           setEmbeddingStatus(statusObj);
 
           if (statusObj.status === "done" || statusObj.status === "error") {
