@@ -5,6 +5,7 @@ import { refineChunks } from "@/lib/chunkRefiner";
 import crypto from "crypto";
 import { mkdir, writeFile } from "fs/promises";
 import path from "path";
+import { processEmbeddings, Chunk } from "@/lib/embeddings";
 
 interface PDFMetadata {
   title?: string;
@@ -29,7 +30,6 @@ function extractMetadata(text: string): PDFMetadata {
   if (lines.length > 0) {
     meta.title = lines[0];
   }
-  // look for explicit author lines
   const authorLine =
     lines.find((l) => /\b(author|by)\b[:\s]/i.test(l)) ||
     lines.find((l) => /^by\s+/i.test(l));
@@ -40,7 +40,6 @@ function extractMetadata(text: string): PDFMetadata {
       .trim();
   }
 
-  // emails
   const emails = Array.from(
     new Set(
       text.match(/\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b/g) || []
@@ -48,25 +47,21 @@ function extractMetadata(text: string): PDFMetadata {
   );
   if (emails.length) meta.emails = emails;
 
-  // phones (very loose)
   const phones = Array.from(
     new Set(text.match(/(\+?\d[\d\-\s\(\)]{6,}\d)/g) || [])
   );
   if (phones.length) meta.phones = phones;
 
-  // urls
   const urls = Array.from(
     new Set(text.match(/\bhttps?:\/\/[^\s)'"<>]+/gi) || [])
   );
   if (urls.length) meta.urls = urls;
 
-  // linkedin/github quick detection
   const linkedIn = urls.find((u) => /linkedin\.com/i.test(u));
   const github = urls.find((u) => /github\.com/i.test(u));
   if (linkedIn) meta.linkedin = linkedIn;
   if (github) meta.github = github;
 
-  // simple skills block
   const skillsMatch = text.match(/skills[:\s\r\n-]{0,3}([\s\S]{0,300})/i);
   if (skillsMatch && skillsMatch[1]) {
     const snippet = skillsMatch[1].split(/\r?\n/)[0] || skillsMatch[1];
@@ -76,7 +71,6 @@ function extractMetadata(text: string): PDFMetadata {
       .filter(Boolean)
       .slice(0, 50);
   } else {
-    // alternate heading keywords
     const techMatch = text.match(
       /(technologies|technical skills|skills and tools)[:\s\r\n-]{0,3}([\s\S]{0,300})/i
     );
@@ -123,17 +117,14 @@ export async function POST(req: Request) {
     console.log("=== [STEP 1] Raw Text Extracted ===");
     console.log("Text length (chars):", text.length);
 
-    // Step 1: rough splitting
     const rawChunks = chunkText(text);
     console.log("=== [STEP 2] Initial Chunking ===");
     console.log("Raw chunks:", rawChunks.length);
     console.log("First raw chunk sample:", rawChunks[0]?.slice(0, 200));
 
-    // Step 2: refining + deduplication
     console.log("=== [STEP 3] Refinement ===");
     const refinedChunks = refineChunks(rawChunks, 0, 200, 3);
 
-    // Step 3: refinement summary
     const totalTokens = refinedChunks.reduce(
       (sum, c) => sum + (c.tokenCount || 0),
       0
@@ -153,9 +144,6 @@ export async function POST(req: Request) {
     console.log("Max tokens in a chunk:", maxTokens);
     console.log("First refined chunk:", refinedChunks[0]);
 
-    // --------------------------
-    // save metadata (conservative + generic)
-    // --------------------------
     const pdfId = crypto.randomUUID();
     try {
       const VECTOR_DIR = path.resolve("./vector");
@@ -177,31 +165,19 @@ export async function POST(req: Request) {
     }
 
     // --------------------------
-    // call embeddings endpoint (fire-and-forget)
+    // call embeddings directly (fire-and-forget)
     // --------------------------
     try {
-      const embeddingsUrl = new URL("/api/embeddings", req.url);
-      // fire-and-forget so the client receives pdfId immediately
-      fetch(embeddingsUrl.toString(), {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          pdfId,
-          chunks: refinedChunks.map((c) => ({ id: c.id, text: c.text })),
-          batchSize: 64, // tuneable
-        }),
-      })
-        .then(async (r) => {
-          try {
-            const j = await r.json();
-            console.log("Embeddings job finished:", j);
-          } catch (e) {
-            console.warn("Embeddings job finished (no json):", e);
-          }
-        })
-        .catch((e) => {
-          console.error("Embeddings job failed (fire-and-forget):", e);
-        });
+      const chunksToEmbed: Chunk[] = refinedChunks.map((c) => ({
+        id: c.id,
+        text: c.text,
+      }));
+
+      processEmbeddings(pdfId, chunksToEmbed, 64)
+        .then((count) =>
+          console.log("Embeddings job finished, total vectors:", count)
+        )
+        .catch((err) => console.error("Embeddings job failed:", err));
     } catch (e) {
       console.error("Failed to launch embeddings job:", e);
     }

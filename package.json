@@ -8,9 +8,6 @@
     "start": "next start",
     "lint": "eslint"
   },
-  "engines": {
-    "node": "20.x"
-  },
   "dependencies": {
     "gpt-tokenizer": "^3.0.1",
     "next": "15.5.0",

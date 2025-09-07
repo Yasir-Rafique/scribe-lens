@@ -50,18 +50,6 @@ export async function POST(req: Request) {
     const vectors: Array<{ id: string; text: string; embedding: number[] }> =
       [];
 
-    try {
-      const res = await fetch("https://api.openai.com/v1/models", {
-        headers: {
-          Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
-        },
-      });
-      const data = await res.json();
-      console.log({ success: true, data });
-    } catch (err) {
-      console.log({ success: false, error: String(err) });
-    }
-
     // process in batches
     for (let i = 0; i < chunks.length; i += batchSize) {
       const batch = chunks.slice(i, i + batchSize) as Chunk[];
