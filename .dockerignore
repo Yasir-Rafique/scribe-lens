@@ -1,0 +1,14 @@
+# Ignore Node.js module directories
+node_modules
+.next
+.vscode
+
+# Ignore log files
+npm-debug.log*
+yarn-debug.log*
+
+# Ignore development files and directories
+.env.local
+.DS_Store
+.git
+.gitignore
