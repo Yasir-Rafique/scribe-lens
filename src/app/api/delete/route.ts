@@ -24,8 +24,8 @@ export async function POST(req: Request) {
       path.join(STATUS_DIR, `${pdfId}.json`),
     ];
 
-    let deleted: string[] = [];
-    let notFound: string[] = [];
+    const deleted: string[] = [];
+    const notFound: string[] = [];
 
     for (const file of filesToDelete) {
       try {
@@ -34,7 +34,8 @@ export async function POST(req: Request) {
       } catch (err: unknown) {
         if (
           (err as NodeJS.ErrnoException).code === "ENOENT" ||
-          (err as any).message?.includes("no such file or directory")
+          (err instanceof Error &&
+            err.message.includes("no such file or directory"))
         ) {
           notFound.push(file);
         } else {

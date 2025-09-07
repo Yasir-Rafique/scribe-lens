@@ -155,7 +155,6 @@ export default function Home() {
     } else if (selectedPdfId) {
       startPollingStatus(selectedPdfId);
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mounted, embeddingStatus?.status, embeddingStatus?.pdfId, selectedPdfId]);
 
   // (avoid duplicates)
@@ -257,7 +256,7 @@ export default function Home() {
         } | null = null;
         try {
           json = text ? JSON.parse(text) : null;
-        } catch (_e) {
+        } catch {
           json = null;
         }
 
@@ -661,20 +660,6 @@ export default function Home() {
     } finally {
       setLoadingSummarize(false);
     }
-  };
-
-  // small UI helper to remove an uploaded doc (optional soft remove)
-  const _removeDocument = (pdfId: string) => {
-    if (
-      !confirm(
-        "Remove this PDF from the list? This will only remove it from the UI (server file remains)."
-      )
-    )
-      return;
-
-    // perform local removal + cleanup (preserves other convs)
-    localRemoveAndCleanup(pdfId);
-    showToast("PDF removed from your list.", "info");
   };
 
   // --- delete modal state & handlers (replace immediate confirm flow) ---
