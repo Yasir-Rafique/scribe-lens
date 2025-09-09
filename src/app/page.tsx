@@ -51,6 +51,7 @@ export default function Home() {
   const [loadingUpload, setLoadingUpload] = useState(false);
   const [loadingAsk, setLoadingAsk] = useState(false);
   const [loadingSummarize, setLoadingSummarize] = useState(false);
+  const [dragActive, setDragActive] = useState(false);
 
   const [confirmPermanentChecked, setConfirmPermanentChecked] = useState(false);
   const [deleteLoading, setDeleteLoading] = useState(false);
@@ -440,29 +441,77 @@ export default function Home() {
       const s = input.toLowerCase();
       const additions: string[] = [];
 
-      if (s.includes("chapter") || s.includes("table of contents")) {
-        additions.push("chapters list chapter headings chapter titles index");
-      }
-      if (s.includes("author") || s.includes("writer")) {
-        additions.push("author writer creator byline introduction");
-      }
-      if (s.includes("literary reference") || s.includes("allusion")) {
+      // title / name
+      if (
+        s.includes("title") ||
+        s.includes("name of the") ||
+        /\bwhat('s| is)? the (title|name) of\b/.test(s) ||
+        /^\s*title\s*[\?\!]*\s*$/i.test(s)
+      ) {
         additions.push(
-          "references citations quoted mentioned works bibliography extracts sources"
+          "title document title paper title front page heading name of paper heading title page"
         );
       }
-      if (s.includes("summary") || s.includes("summarize")) {
-        additions.push("summary overview key points main takeaways");
-      }
-      if (s.includes("payment") || s.includes("payment terms")) {
-        additions.push("billing invoicing payment schedule final payment");
+
+      // authors / byline
+      if (
+        s.includes("author") ||
+        s.includes("authors") ||
+        s.includes("who wrote") ||
+        s.includes("who are the authors") ||
+        s.includes("written by") ||
+        s.includes("byline")
+      ) {
+        additions.push(
+          "author authors byline writer creator contributors affiliation"
+        );
       }
 
-      // small generic boost
+      // abstract / summary / what is this about
+      if (
+        s.includes("abstract") ||
+        s.includes("summary") ||
+        s.includes("what is this about") ||
+        s.includes("what is this document about") ||
+        s.includes("purpose") ||
+        s.includes("objective") ||
+        s.includes("aim")
+      ) {
+        additions.push("abstract summary overview main takeaways key points");
+      }
+
+      // keywords
+      if (s.includes("keyword") || s.includes("keywords")) {
+        additions.push("keywords key words index terms subject headings");
+      }
+
+      // references / citations / bibliography
+      if (
+        s.includes("reference") ||
+        s.includes("references") ||
+        s.includes("bibliography") ||
+        s.includes("citations")
+      ) {
+        additions.push(
+          "references bibliography citations works cited DOI list of references"
+        );
+      }
+
+      // requirements / functional or non-functional
+      if (s.includes("requirement") || s.includes("requirements")) {
+        additions.push(
+          "requirements functional requirements security requirements FR SR"
+        );
+      }
+
+      // small generic boost if nothing matched
       if (additions.length === 0) {
-        additions.push("summary key points details clauses");
+        additions.push(
+          "summary key points details clauses title authors keywords references"
+        );
       }
 
+      // return expanded query (keeps original phrasing but adds semantic hints)
       return `${input} ${additions.join(" ")}`;
     };
 
@@ -515,7 +564,24 @@ export default function Home() {
 
       // --- context validation ---
       const contexts = Array.isArray(data.context) ? data.context : [];
-      if (contexts.length === 0 || !data.answer) {
+      const answerText = (data.answer || "").toString();
+
+      // If the backend explicitly returned a polite fallback message, show friendly fallback
+      const politeFallback =
+        "I couldn't find that information in the uploaded document. Could you try rephrasing your question or check a different document?";
+      const isPoliteFallback =
+        answerText.trim().length === 0 || answerText.trim() === politeFallback;
+
+      if (!data?.success) {
+        const err = data?.error ?? "Unknown error from /api/ask";
+        appendMessageToConv({ role: "ai", text: `❌ Error: ${err}` });
+        showToast(`Ask failed: ${err}`, "error");
+        setQuestion("");
+        return;
+      }
+
+      if (isPoliteFallback) {
+        // keep previous user-facing fallback but preserve the original wording from backend if available
         appendMessageToConv({
           role: "ai",
           text: "I couldn’t find that information in the uploaded document. Please try rephrasing your question.",
@@ -872,71 +938,169 @@ export default function Home() {
           </div>
         </header>
 
-        <section className="rounded-2xl border bg-white p-4 pb-8">
+        <section className="relative rounded-2xl border bg-white p-4 pb-8">
           <h2 className="font-semibold mb-2">1) Upload a document (PDF)</h2>
 
+          {/* Hidden file input */}
           <input
             ref={fileInputRef}
+            id="file-upload"
             type="file"
             accept="application/pdf"
             onChange={onUpload}
-            className="block w-full"
+            className="hidden"
+            aria-label="Upload PDF"
           />
 
-          {file && (
-            <div className="mt-2 flex gap-2 items-center">
-              <p className="text-sm text-gray-600">Selected: {file.name}</p>
-
-              {/* Cancel/clear selection before processing */}
-              {!loadingUpload && (
-                <button
-                  onClick={() => {
-                    setFile(null);
-                    if (fileInputRef.current) fileInputRef.current.value = "";
-                    showToast("Upload selection cleared.", "info");
-                  }}
-                  className="ml-2 rounded-full border px-2 py-0.5 text-sm hover:bg-gray-50"
-                  title="Clear selection"
-                >
-                  ✕
-                </button>
-              )}
-
-              <button
-                onClick={uploadFile}
-                disabled={loadingUpload}
-                className="rounded-xl border px-3 py-1 text-sm hover:bg-gray-50 disabled:opacity-60"
-              >
-                {loadingUpload ? "Processing..." : "Process"}
-              </button>
+          {/* State for drag overlay */}
+          {dragActive && (
+            <div className="absolute inset-0 z-10 bg-blue-50/80 border-2 border-blue-400 border-dashed rounded-2xl flex items-center justify-center pointer-events-none">
+              <p className="text-blue-600 font-semibold">Drop your PDF here</p>
             </div>
           )}
-          <div className="text-xs text-gray-500 text-right">
+
+          {/* Upload area */}
+          <label
+            htmlFor="file-upload"
+            onDragOver={(e) => {
+              e.preventDefault();
+              setDragActive(true);
+            }}
+            onDragLeave={() => setDragActive(false)}
+            onDrop={(e) => {
+              e.preventDefault();
+              setDragActive(false);
+              if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+                const file = e.dataTransfer.files[0];
+                onUpload({
+                  target: { files: [file] },
+                } as unknown as React.ChangeEvent<HTMLInputElement>);
+              }
+            }}
+            className="block w-full cursor-pointer rounded-xl border-2 border-dashed border-gray-300 hover:border-blue-400 p-4 text-sm text-gray-700 hover:bg-gray-50 transition relative z-0"
+            title="Click or drop a PDF here to upload"
+          >
+            <div className="flex items-center gap-3">
+              <div className="flex-shrink-0">
+                <svg
+                  className="w-6 h-6 text-gray-500"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                >
+                  <path
+                    strokeWidth="1.5"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    d="M12 3v12m0 0l-4-4m4 4 4-4"
+                  />
+                  <rect
+                    x="3"
+                    y="7"
+                    width="18"
+                    height="14"
+                    rx="2"
+                    strokeWidth="1.2"
+                  />
+                </svg>
+              </div>
+
+              <div className="min-w-0">
+                <div className="font-medium">
+                  Click to choose a PDF or drop it here
+                </div>
+                <div className="text-xs text-gray-500 mt-0.5">
+                  You can upload multiple PDFs over time. Each upload is added
+                  to the list below. Upload a new file anytime and choose it
+                  from the dropdown.
+                </div>
+              </div>
+            </div>
+          </label>
+
+          {/* Selected-file preview */}
+          {file && (
+            <div className="mt-3 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+              <div className="flex items-center gap-2 min-w-0">
+                <p className="text-sm text-gray-700 min-w-0">
+                  <span className="font-medium">Selected:</span>{" "}
+                  <span className="ml-1 inline-block align-middle max-w-[60vw] sm:max-w-[40vw] truncate">
+                    {file.name}
+                  </span>
+                </p>
+
+                {!loadingUpload && (
+                  <button
+                    onClick={() => {
+                      setFile(null);
+                      if (fileInputRef.current)
+                        (fileInputRef.current as HTMLInputElement).value = "";
+                      showToast("Upload selection cleared.", "info");
+                    }}
+                    className="ml-1 rounded-full border px-2 py-0.5 text-sm hover:bg-gray-50 flex-shrink-0"
+                    title="Clear selection"
+                  >
+                    ✕
+                  </button>
+                )}
+              </div>
+
+              <div className="flex items-center gap-2 flex-shrink-0">
+                <button
+                  onClick={uploadFile}
+                  disabled={loadingUpload}
+                  className="rounded-xl border px-3 py-1 text-sm hover:bg-gray-50 disabled:opacity-60"
+                >
+                  {loadingUpload ? "Processing..." : "Process"}
+                </button>
+
+                <button
+                  onClick={() => {
+                    if (fileInputRef.current)
+                      (fileInputRef.current as HTMLInputElement).click();
+                  }}
+                  className="rounded-xl border px-3 py-1 text-sm hover:bg-gray-50"
+                  title="Upload another PDF"
+                >
+                  Upload another
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* Status */}
+          <div className="text-xs text-gray-500 text-right mt-3">
             {selectedDoc ? (
-              <>
-                <div className="font-medium">Selected PDF</div>
-                <div className="mt-1">{selectedDoc.fileName}</div>
-              </>
+              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-end gap-2">
+                <div className="text-right min-w-0">
+                  <div className="font-medium">Selected PDF</div>
+                  <div className="mt-0.5 truncate max-w-[40vw]">
+                    {selectedDoc.fileName}
+                  </div>
+                </div>
+              </div>
             ) : (
               <div>No PDF selected</div>
             )}
           </div>
 
-          {/* uploaded docs dropdown */}
+          {/* Uploaded docs dropdown */}
           {uploadedDocs.length > 0 && (
             <div className="mt-4">
-              <label className="text-sm text-gray-500">
+              <label className="text-sm text-gray-500 flex items-center gap-2">
                 Uploaded documents
+                <span className="px-2 py-0.5 rounded-full bg-gray-100 text-gray-600 text-xs">
+                  {uploadedDocs.length}
+                </span>
               </label>
+
               <div className="mt-2 flex flex-col sm:flex-row sm:items-center sm:gap-2">
                 <select
                   value={selectedPdfId ?? ""}
-                  onChange={(e) => {
-                    setSelectedPdfId(e.target.value || null);
-                    // load messages from convMap via effect - no need to clear here
-                  }}
-                  className="rounded-xl border px-3 py-2 flex-1"
+                  onChange={(e) => setSelectedPdfId(e.target.value || null)}
+                  className="rounded-xl border px-3 py-2 flex-1 min-w-0"
                 >
+                  <option value="">-- choose document --</option>
                   {uploadedDocs.map((d) => (
                     <option key={d.pdfId} value={d.pdfId}>
                       {d.fileName}
@@ -944,38 +1108,36 @@ export default function Home() {
                   ))}
                 </select>
 
-                <div className="mt-2 text-sm text-gray-600">
-                  {selectedPdfId && (
-                    <div>
-                      <button
-                        onClick={() => {
-                          if (selectedPdfId) {
-                            handleDeleteAction(selectedPdfId);
-                          }
-                        }}
-                        className="ml-2 text-red-500 hover:underline"
-                      >
-                        Remove
-                      </button>
+                {selectedPdfId && (
+                  <div className="mt-2 sm:mt-0 flex items-center gap-2 text-sm text-gray-600 flex-wrap">
+                    <button
+                      onClick={() =>
+                        selectedPdfId && handleDeleteAction(selectedPdfId)
+                      }
+                      className="text-red-500 hover:underline whitespace-nowrap flex-shrink-0"
+                    >
+                      Remove
+                    </button>
+                    <div className="text-xs text-gray-500">
+                      You can upload more PDFs and switch using the dropdown.
                     </div>
-                  )}
-                </div>
+                  </div>
+                )}
               </div>
 
-              {/* progress UI */}
+              {/* Progress UI */}
               {embeddingStatus && embeddingStatus.pdfId === selectedPdfId && (
                 <div className="mt-3">
-                  <div className="flex items-center justify-between text-sm text-gray-600 mb-1">
-                    <div>
+                  <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between text-sm text-gray-600 mb-1 gap-2">
+                    <div className="min-w-0">
                       Embedding: {embeddingStatus.processed ?? 0}/
                       {embeddingStatus.total ?? 0}
                     </div>
-                    <div className="text-xs">
-                      {embeddingStatus.status.toUpperCase()}
+                    <div className="text-xs whitespace-nowrap">
+                      {(embeddingStatus.status || "").toUpperCase()}
                     </div>
                   </div>
 
-                  {/* progress bar + percent */}
                   <div className="w-full bg-gray-200 rounded-full h-2 relative">
                     {(() => {
                       const total = embeddingStatus.total ?? 0;
@@ -986,7 +1148,7 @@ export default function Home() {
                         <>
                           <div
                             style={{ width: `${pct}%`, height: "100%" }}
-                            className="bg-blue-500 rounded-full"
+                            className="bg-blue-500 rounded-full transition-all"
                           />
                           <div className="mt-1 text-right text-xs text-gray-600">
                             {pct}%
@@ -1013,17 +1175,19 @@ export default function Home() {
                 className={m.role === "user" ? "text-right" : "text-left"}
               >
                 <div
-                  className={`inline-block rounded-2xl px-3 py-2 ${
-                    m.role === "user" ? "bg-blue-50" : "bg-gray-100"
+                  className={`inline-block rounded-2xl px-3 py-2 whitespace-normal break-words max-w-full ${
+                    m.role === "user"
+                      ? "bg-blue-50 text-right"
+                      : "bg-gray-100 text-left"
                   }`}
                 >
                   <strong>{m.role === "user" ? "You" : "AI"}:</strong>{" "}
-                  <span>{m.text}</span>
+                  <span className="ml-1">{m.text}</span>
                 </div>
               </div>
             ))}
 
-            {/* Typing / thinking indicator shown */}
+            {/* Typing / thinking indicator */}
             {(loadingAsk || loadingSummarize) && (
               <div className="text-left mt-2">
                 <span className="inline-block rounded-2xl px-3 py-2 bg-gray-100">
@@ -1036,47 +1200,104 @@ export default function Home() {
             )}
           </div>
 
-          <div className="flex gap-2">
+          {/* Input + actions: responsive */}
+          <div className="flex flex-col sm:flex-row sm:items-center gap-2">
+            {/* Input grows and truncates when space is small */}
             <input
               value={question}
               onChange={(e) => setQuestion(e.target.value)}
+              onKeyDown={(e) => {
+                // Enter to send (Shift+Enter for newline)
+                if (e.key === "Enter" && !e.shiftKey) {
+                  e.preventDefault();
+                  if (
+                    !(
+                      loadingAsk ||
+                      !selectedPdfId ||
+                      (embeddingStatus?.pdfId === selectedPdfId &&
+                        embeddingStatus?.status === "processing")
+                    )
+                  ) {
+                    ask();
+                  }
+                }
+              }}
               placeholder="e.g., What are the main requirements?"
-              className="flex-1 rounded-xl border px-3 py-2"
+              className="flex-1 min-w-0 rounded-xl border px-3 py-2"
+              aria-label="Ask a question about the selected PDF"
             />
-            <button
-              onClick={ask}
-              disabled={
-                !!(
+
+            {/* Buttons container: stack on mobile, inline on larger screens */}
+            <div className="flex flex-col sm:flex-row gap-2 w-full sm:w-auto">
+              {/* Ask (primary) */}
+              <button
+                onClick={ask}
+                disabled={
+                  !!(
+                    loadingAsk ||
+                    !selectedPdfId ||
+                    (embeddingStatus?.pdfId === selectedPdfId &&
+                      embeddingStatus?.status === "processing")
+                  )
+                }
+                className={`w-full sm:w-auto rounded-xl px-4 py-2 transition transform duration-150 ${
                   loadingAsk ||
                   !selectedPdfId ||
                   (embeddingStatus?.pdfId === selectedPdfId &&
                     embeddingStatus?.status === "processing")
-                )
-              }
-              className="rounded-xl border px-4 py-2 hover:bg-gray-50 disabled:opacity-60"
-            >
-              {loadingAsk ? "Thinking..." : "Ask"}
-            </button>
+                    ? "bg-gray-200 text-gray-600 border disabled:opacity-60 cursor-not-allowed"
+                    : "bg-blue-600 text-white hover:bg-blue-700 hover:shadow-md hover:-translate-y-0.5"
+                }`}
+                aria-disabled={
+                  !!(
+                    loadingAsk ||
+                    !selectedPdfId ||
+                    (embeddingStatus?.pdfId === selectedPdfId &&
+                      embeddingStatus?.status === "processing")
+                  )
+                }
+              >
+                {loadingAsk ? "Thinking..." : "Ask"}
+              </button>
 
-            <button
-              onClick={summarize}
-              disabled={
-                !!(
+              {/* Summarize (secondary) */}
+              <button
+                onClick={summarize}
+                disabled={
+                  !!(
+                    loadingSummarize ||
+                    !selectedPdfId ||
+                    (embeddingStatus?.pdfId === selectedPdfId &&
+                      embeddingStatus?.status === "processing") ||
+                    (selectedPdfId && summarizedMap[selectedPdfId])
+                  )
+                }
+                className={`w-full sm:w-auto rounded-xl px-4 py-2 border transition duration-150 ${
                   loadingSummarize ||
                   !selectedPdfId ||
                   (embeddingStatus?.pdfId === selectedPdfId &&
                     embeddingStatus?.status === "processing") ||
                   (selectedPdfId && summarizedMap[selectedPdfId])
-                )
-              }
-              className="rounded-xl border px-4 py-2 hover:bg-gray-50 disabled:opacity-60"
-            >
-              {selectedPdfId && summarizedMap[selectedPdfId]
-                ? "Summarized"
-                : loadingSummarize
-                ? "Summarizing..."
-                : "Summarize"}
-            </button>
+                    ? "bg-gray-100 text-gray-500 cursor-not-allowed"
+                    : "bg-white text-gray-700 hover:bg-gray-50 hover:shadow-md"
+                }`}
+                aria-disabled={
+                  !!(
+                    loadingSummarize ||
+                    !selectedPdfId ||
+                    (embeddingStatus?.pdfId === selectedPdfId &&
+                      embeddingStatus?.status === "processing") ||
+                    (selectedPdfId && summarizedMap[selectedPdfId])
+                  )
+                }
+              >
+                {selectedPdfId && summarizedMap[selectedPdfId]
+                  ? "Summarized"
+                  : loadingSummarize
+                  ? "Summarizing..."
+                  : "Summarize"}
+              </button>
+            </div>
           </div>
         </section>
 

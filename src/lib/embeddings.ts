@@ -11,10 +11,16 @@ const STATUS_DIR = path.join(VECTOR_DIR, "status");
 
 export type Chunk = { id?: string; text: string };
 
+function l2Normalize(vec: number[]) {
+  const norm = Math.sqrt(vec.reduce((s, v) => s + v * v, 0)) || 1;
+  return vec.map((v) => v / norm);
+}
+
 export async function processEmbeddings(
   pdfId: string,
   chunks: Chunk[],
-  batchSize = 64
+  batchSize = 64,
+  embeddingModel = "text-embedding-3-small"
 ) {
   await mkdir(VECTOR_DIR, { recursive: true });
   await mkdir(STATUS_DIR, { recursive: true });
@@ -22,7 +28,6 @@ export async function processEmbeddings(
   const outPath = path.join(VECTOR_DIR, `${pdfId}.json`);
   const statusPath = path.join(STATUS_DIR, `${pdfId}.json`);
 
-  // Initialize status
   const total = chunks.length;
   const initialStatus = {
     pdfId,
@@ -31,35 +36,43 @@ export async function processEmbeddings(
     status: "processing",
     error: null,
   };
+
   try {
-    const tmpInit = statusPath + ".tmp";
-    await writeFile(tmpInit, JSON.stringify(initialStatus, null, 2), "utf-8");
-    await rename(tmpInit, statusPath);
+    await writeFile(
+      statusPath + ".tmp",
+      JSON.stringify(initialStatus, null, 2),
+      "utf-8"
+    );
+    await rename(statusPath + ".tmp", statusPath);
   } catch (e) {
     console.warn("Failed to write initial status:", e);
   }
 
   const vectors: Array<{ id: string; text: string; embedding: number[] }> = [];
 
-  // Process in batches
   for (let i = 0; i < chunks.length; i += batchSize) {
     const batch = chunks.slice(i, i + batchSize);
     const inputs = batch.map((c) => c.text);
 
     const resp = await openai.embeddings.create({
-      model: "text-embedding-3-small",
+      model: embeddingModel,
       input: inputs,
     });
 
-    for (let j = 0; j < resp.data.length; j++) {
+    const respData = Array.isArray(resp?.data) ? resp.data : [];
+    for (let j = 0; j < respData.length; j++) {
+      const emb = respData[j]?.embedding;
+      if (!Array.isArray(emb)) {
+        console.warn(`No embedding for item ${i + j}`);
+        continue;
+      }
       vectors.push({
         id: batch[j].id ?? crypto.randomUUID(),
         text: batch[j].text,
-        embedding: resp.data[j].embedding,
+        embedding: l2Normalize(emb),
       });
     }
 
-    // Update status
     const processed = Math.min(i + batch.length, total);
     const status = {
       pdfId,
@@ -69,24 +82,29 @@ export async function processEmbeddings(
       error: null,
     };
     try {
-      const tmpStatus = statusPath + ".tmp";
-      await writeFile(tmpStatus, JSON.stringify(status, null, 2), "utf-8");
-      await rename(tmpStatus, statusPath);
+      await writeFile(
+        statusPath + ".tmp",
+        JSON.stringify(status, null, 2),
+        "utf-8"
+      );
+      await rename(statusPath + ".tmp", statusPath);
     } catch (e) {
       console.warn("Failed to update status file:", e);
     }
 
-    // Write partial vectors
     try {
-      const tmpOut = outPath + ".tmp";
-      await writeFile(tmpOut, JSON.stringify(vectors, null, 2), "utf-8");
-      await rename(tmpOut, outPath);
+      await writeFile(
+        outPath + ".tmp",
+        JSON.stringify(vectors, null, 2),
+        "utf-8"
+      );
+      await rename(outPath + ".tmp", outPath);
     } catch (e) {
       console.warn("Failed to write partial vectors:", e);
     }
   }
 
-  // Final status
+  // final status
   try {
     const finalStatus = {
       pdfId,
@@ -95,11 +113,28 @@ export async function processEmbeddings(
       status: "done",
       error: null,
     };
-    const tmpFinal = statusPath + ".tmp";
-    await writeFile(tmpFinal, JSON.stringify(finalStatus, null, 2), "utf-8");
-    await rename(tmpFinal, statusPath);
+    await writeFile(
+      statusPath + ".tmp",
+      JSON.stringify(finalStatus, null, 2),
+      "utf-8"
+    );
+    await rename(statusPath + ".tmp", statusPath);
   } catch (e) {
     console.warn("Failed to write final status:", e);
+  }
+
+  // ensure final vector file exists (atomic final attempt)
+  try {
+    await writeFile(
+      outPath + ".tmp",
+      JSON.stringify(vectors, null, 2),
+      "utf-8"
+    );
+    await rename(outPath + ".tmp", outPath);
+  } catch (e) {
+    // non-fatal: file likely already exists
+    // log for diagnostic
+    console.warn("Final write of vectors failed (non-fatal):", e);
   }
 
   return vectors.length;

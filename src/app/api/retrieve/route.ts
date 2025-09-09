@@ -4,102 +4,149 @@ import fs from "fs";
 import path from "path";
 import OpenAI from "openai";
 
-// Define the shape of a single vector entry
-interface VectorItem {
-  id?: string;
-  text: string;
-  embedding?: number[];
-  embeddings?: number[];
-  vector?: number[];
+const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+const VECTOR_DIR = path.resolve("./vector");
+
+function cosineSimilarity(a: number[], b: number[]) {
+  if (!Array.isArray(a) || !Array.isArray(b) || a.length !== b.length) return 0;
+  let dot = 0,
+    na = 0,
+    nb = 0;
+  for (let i = 0; i < a.length; i++) {
+    dot += a[i] * b[i];
+    na += a[i] * a[i];
+    nb += b[i] * b[i];
+  }
+  if (na === 0 || nb === 0) return 0;
+  return dot / (Math.sqrt(na) * Math.sqrt(nb));
 }
 
-const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+function safeSnippet(t: string, len = 300) {
+  if (!t) return "";
+  return t.replace(/\s+/g, " ").trim().slice(0, len);
+}
 
-const VECTOR_DIR = path.join(process.cwd(), "vector");
-
-// Safe cosine similarity (returns 0 on mismatch)
-function cosineSimilarity(vecA: number[], vecB: number[]): number {
-  if (
-    !Array.isArray(vecA) ||
-    !Array.isArray(vecB) ||
-    vecA.length !== vecB.length
-  )
-    return 0;
-  let dot = 0;
-  let normA = 0;
-  let normB = 0;
-  for (let i = 0; i < vecA.length; i++) {
-    dot += vecA[i] * vecB[i];
-    normA += vecA[i] * vecA[i];
-    normB += vecB[i] * vecB[i];
-  }
-  if (normA === 0 || normB === 0) return 0;
-  return dot / (Math.sqrt(normA) * Math.sqrt(normB));
+function keywordScore(query: string, text: string) {
+  if (!query || !text) return 0;
+  const qTokens = Array.from(
+    new Set((query.toLowerCase().match(/\b\w{4,}\b/g) ?? []).slice(0, 20))
+  );
+  if (qTokens.length === 0) return 0;
+  const txt = text.toLowerCase();
+  let count = 0;
+  for (const t of qTokens) if (txt.includes(t)) count++;
+  return count;
 }
 
 export async function POST(req: Request) {
   try {
     const body = await req.json();
-    const query: string = body?.query ?? body?.question;
+    const query: string =
+      (body?.query ?? body?.question ?? "").toString?.() ?? "";
     const pdfId: string | undefined = body?.pdfId;
-    const topK: number = Number(body?.topK ?? 3);
+    const topK: number = Math.max(1, Number(body?.topK ?? 5));
+    const debug: boolean = !!body?.debug;
 
-    if (!query || typeof query !== "string") {
+    if (!query)
       return NextResponse.json(
-        { success: false, error: "Query (or question) is required" },
+        { success: false, error: "Query is required" },
         { status: 400 }
       );
-    }
-    if (!pdfId || typeof pdfId !== "string") {
+    if (!pdfId)
       return NextResponse.json(
         { success: false, error: "pdfId is required" },
         { status: 400 }
       );
-    }
 
     const filePath = path.join(VECTOR_DIR, `${pdfId}.json`);
-    if (!fs.existsSync(filePath)) {
+    if (!fs.existsSync(filePath))
       return NextResponse.json(
-        { success: false, error: `No vectors found for pdfId=${pdfId}` },
+        { success: false, error: "No vectors found" },
         { status: 404 }
       );
-    }
 
-    // 1) Embed the query
-    const embeddingResp = await openai.embeddings.create({
+    const raw = fs.readFileSync(filePath, "utf-8");
+    const vectorData = JSON.parse(raw) as any[]; // array of {id, text, embedding}
+
+    // 1) embed query
+    const embResp = await openai.embeddings.create({
       model: "text-embedding-3-small",
       input: query,
     });
-    const queryEmbedding = embeddingResp.data?.[0]?.embedding;
-    if (!Array.isArray(queryEmbedding)) {
+    const qVec = embResp.data?.[0]?.embedding;
+    if (!Array.isArray(qVec))
       return NextResponse.json(
-        { success: false, error: "Failed to create query embedding" },
+        { success: false, error: "Failed to create embedding" },
         { status: 500 }
       );
+    const queryDim = qVec.length;
+
+    // determine vectorDim
+    let vectorDim = 0;
+    for (const v of vectorData) {
+      const vec = v.embedding ?? v.embeddings ?? v.vector ?? null;
+      if (Array.isArray(vec)) {
+        vectorDim = vec.length;
+        break;
+      }
     }
 
-    // 2) Load vectors for this PDF and cast to the new, safe type
-    const raw = fs.readFileSync(filePath, "utf-8");
-    const vectorData = JSON.parse(raw) as VectorItem[];
+    const dimensionMismatch = vectorDim > 0 && vectorDim !== queryDim;
 
-    // 3) Score each vector (support both `embedding` and `embeddings` field names)
+    // score
     const scored = vectorData
-      .map((item: VectorItem) => {
-        const vec = item.embedding ?? item.embeddings ?? item.vector ?? null;
-        if (!Array.isArray(vec)) return null;
-        const score = cosineSimilarity(queryEmbedding, vec);
-        return {
-          id: item.id ?? null,
-          text: item.text ?? "",
-          score,
-        };
+      .map((v) => {
+        const vec = v.embedding ?? v.embeddings ?? v.vector ?? null;
+        let score = 0;
+        if (Array.isArray(vec) && !dimensionMismatch) {
+          score = cosineSimilarity(qVec, vec);
+        } else {
+          score = keywordScore(query, v.text ?? "");
+        }
+        return { id: v.id ?? null, text: v.text ?? "", score };
       })
-      .filter(Boolean) as { id: string | null; text: string; score: number }[];
+      .filter(Boolean);
 
-    // 4) Sort + return topK
-    const results = scored.sort((a, b) => b.score - a.score).slice(0, topK);
+    scored.sort((a, b) => b.score - a.score);
+    const results = scored
+      .slice(0, topK)
+      .map((r) => ({
+        id: r.id,
+        preview: safeSnippet(r.text, 400),
+        score: r.score,
+      }));
 
-    return NextResponse.json({ success: true, results });
+    const scoresOnly = scored.map((s) => s.score);
+    const topScore = scoresOnly.length ? Math.max(...scoresOnly) : 0;
+    const avgScore = scoresOnly.length
+      ? scoresOnly.reduce((a, b) => a + b, 0) / scoresOnly.length
+      : 0;
+
+    const resp: any = {
+      success: true,
+      results,
+      debug: {
+        numVectors: vectorData.length,
+        vectorDim,
+        queryDim,
+        dimensionMismatch,
+        topScore,
+        avgScore,
+      },
+    };
+    if (debug) {
+      resp.sample = (vectorData ?? []).slice(0, 6).map((v) => {
+        const emb = v.embedding ?? v.embeddings ?? v.vector ?? null;
+        return {
+          id: v.id ?? null,
+          preview: safeSnippet(v.text ?? "", 300),
+          hasEmbedding: Array.isArray(emb),
+          embLength: Array.isArray(emb) ? emb.length : 0,
+        };
+      });
+    }
+
+    return NextResponse.json(resp);
   } catch (err: unknown) {
     console.error("Retrieve error:", err);
     return NextResponse.json(
