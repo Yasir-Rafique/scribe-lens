@@ -1021,8 +1021,8 @@ export default function Home() {
           {/* Selected-file preview */}
           {file && (
             <div className="mt-3 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
-              <div className="flex items-center gap-2 min-w-0">
-                <p className="text-sm text-gray-700 min-w-0">
+              <div className="flex items-center gap-1 min-w-0">
+                <p className="mt-12 text-sm text-gray-700 min-w-0">
                   <span className="font-medium">Selected:</span>{" "}
                   <span className="ml-1 inline-block align-middle max-w-[60vw] sm:max-w-[40vw] truncate">
                     {file.name}
