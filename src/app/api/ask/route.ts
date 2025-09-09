@@ -65,17 +65,29 @@ function isAuthorQuery(q: string) {
     q
   );
 }
-function isReferenceQuery(q: string) {
-  return /\b(reference|references|bibliography|works cited|citations)\b/i.test(
-    q
-  );
-}
+// ⚠️ unused, removed to silence lint error
+// function isReferenceQuery(q: string) {
+//   return /\b(reference|references|bibliography|works cited|citations)\b/i.test(q);
+// }
+
+// --- Types ---
+type VectorEntry = {
+  id?: string | number | null;
+  text?: string;
+  embedding?: number[];
+  embeddings?: number[];
+  vector?: number[];
+};
 
 // Create a short summary from sampled chunks using the LLM
-async function synthesizeDocSummary(vectors: any[], maxCharsPerSnippet = 1200) {
+async function synthesizeDocSummary(
+  vectors: VectorEntry[],
+  maxCharsPerSnippet = 1200
+): Promise<string> {
   if (!Array.isArray(vectors) || vectors.length === 0) return "";
   const n = vectors.length;
-  const samples = [];
+  const samples: string[] = [];
+
   samples.push(safeSnippet(vectors[0]?.text ?? "", maxCharsPerSnippet));
   if (n > 4) {
     samples.push(
@@ -147,7 +159,7 @@ export async function POST(req: Request) {
       );
 
     const raw = fs.readFileSync(filePath, "utf-8");
-    const vectorData = JSON.parse(raw) as any[]; // array of {id, text, embedding}
+    const vectorData: VectorEntry[] = JSON.parse(raw);
 
     // embed the retrievalQuery first (if different) else query
     let qEmbeddingResp;
@@ -162,7 +174,7 @@ export async function POST(req: Request) {
         e
       );
     }
-    let qVec = qEmbeddingResp?.data?.[0]?.embedding;
+    let qVec: number[] | undefined = qEmbeddingResp?.data?.[0]?.embedding;
     if (!Array.isArray(qVec)) {
       const emb2 = await openai.embeddings.create({
         model: "text-embedding-3-small",
@@ -200,12 +212,9 @@ export async function POST(req: Request) {
           // fallback to keyword scoring when dims mismatch
           score = keywordScore(query, v.text ?? "");
         }
-        // penalize direct junk/noisy/chrome/ResearchGate footers
         if (isNoisyText(v.text ?? "")) score -= 0.2;
-        // boost front chunks for title/author queries
         if (isTitleQuery(query) && idx < 4) score += 0.45;
         if (isAuthorQuery(query) && idx < 6) score += 0.25;
-        // small boost for snippets that contain "abstract" when user asks generic "what is this about"
         if (
           /\b(what is this about|summary|abstract|what is this document about)\b/i.test(
             query
@@ -220,7 +229,6 @@ export async function POST(req: Request) {
 
     const contextEntries = scored.slice(0, Math.min(topK, scored.length));
 
-    // if top score is low, synthesize a short summary and prepend to context
     const topScore = contextEntries[0]?.score ?? 0;
     const LOW_SCORE_THRESHOLD = 0.32;
     let summaryText = "";
@@ -228,7 +236,6 @@ export async function POST(req: Request) {
       summaryText = await synthesizeDocSummary(vectorData);
     }
 
-    // build contextText
     let contextText = "";
     if (summaryHint)
       contextText += `Document Summary (hint):\n${safeSnippet(
@@ -246,7 +253,6 @@ export async function POST(req: Request) {
         .join("\n\n");
     }
 
-    // system prompt instructing natural behavior
     const systemPrompt = `
 You are an assistant that answers questions about a PDF. Use ONLY the provided context snippets.
 - If the user asks for the TITLE or AUTHOR(S), prefer information from the beginning of the document (front matter).
@@ -260,7 +266,6 @@ Answer naturally and concisely. If the exact information is not present, say you
       ? `Context:\n${contextText}\n\nQuestion: ${query}`
       : `Question: ${query}`;
 
-    // call the model
     const completion = await openai.chat.completions.create({
       model: "gpt-4o-mini",
       messages: [
@@ -273,7 +278,6 @@ Answer naturally and concisely. If the exact information is not present, say you
     let answer =
       completion.choices?.[0]?.message?.content ?? "No answer generated.";
 
-    // if assistant returned an explicit fallback or clear non-answer, be honest and say not found
     const lower = (answer || "").toLowerCase();
     const fallbackPhrases = [
       "i couldn't find",
@@ -284,27 +288,24 @@ Answer naturally and concisely. If the exact information is not present, say you
     ];
     const isUnhelpful = fallbackPhrases.some((p) => lower.includes(p));
     if (isUnhelpful && summaryText) {
-      // if it couldn't find but we have a summary, use the summary as reply
       answer = summaryText;
     } else if (isUnhelpful) {
-      // preserve polite fallback
       answer =
         "I couldn't find that information in the document. Please try rephrasing the question.";
     }
 
-    // prepare context output for UI (top snippets + scores)
     const contextOut = contextEntries.map((c) => ({
       text: c.text,
       score: c.score,
     }));
 
-    const resp: any = {
+    const resp = {
       success: true,
       answer,
       context: contextOut,
       debug: { topScore, dimensionMismatch, vectorDim, queryDim: queryDim },
+      ...(debug && { rawTop: contextEntries.slice(0, 8) }),
     };
-    if (debug) resp.rawTop = contextEntries.slice(0, 8);
 
     return NextResponse.json(resp);
   } catch (err: unknown) {

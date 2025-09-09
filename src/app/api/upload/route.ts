@@ -3,7 +3,7 @@ import { NextResponse } from "next/server";
 import { extractTextFromPDF, chunkText } from "@/lib/pdf";
 import { refineChunks } from "@/lib/chunkRefiner";
 import crypto from "crypto";
-import path from "path";
+//import path from "path";
 import { processEmbeddings, Chunk } from "@/lib/embeddings";
 
 export async function POST(req: Request) {

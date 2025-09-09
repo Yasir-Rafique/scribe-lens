@@ -38,6 +38,15 @@ function keywordScore(query: string, text: string) {
   return count;
 }
 
+// Define types for vector entries
+type VectorEntry = {
+  id?: string | null;
+  text?: string;
+  embedding?: number[];
+  embeddings?: number[];
+  vector?: number[];
+};
+
 export async function POST(req: Request) {
   try {
     const body = await req.json();
@@ -66,7 +75,7 @@ export async function POST(req: Request) {
       );
 
     const raw = fs.readFileSync(filePath, "utf-8");
-    const vectorData = JSON.parse(raw) as any[]; // array of {id, text, embedding}
+    const vectorData = JSON.parse(raw) as VectorEntry[];
 
     // 1) embed query
     const embResp = await openai.embeddings.create({
@@ -108,13 +117,11 @@ export async function POST(req: Request) {
       .filter(Boolean);
 
     scored.sort((a, b) => b.score - a.score);
-    const results = scored
-      .slice(0, topK)
-      .map((r) => ({
-        id: r.id,
-        preview: safeSnippet(r.text, 400),
-        score: r.score,
-      }));
+    const results = scored.slice(0, topK).map((r) => ({
+      id: r.id,
+      preview: safeSnippet(r.text, 400),
+      score: r.score,
+    }));
 
     const scoresOnly = scored.map((s) => s.score);
     const topScore = scoresOnly.length ? Math.max(...scoresOnly) : 0;
@@ -122,7 +129,7 @@ export async function POST(req: Request) {
       ? scoresOnly.reduce((a, b) => a + b, 0) / scoresOnly.length
       : 0;
 
-    const resp: any = {
+    const resp = {
       success: true,
       results,
       debug: {
@@ -135,15 +142,17 @@ export async function POST(req: Request) {
       },
     };
     if (debug) {
-      resp.sample = (vectorData ?? []).slice(0, 6).map((v) => {
-        const emb = v.embedding ?? v.embeddings ?? v.vector ?? null;
-        return {
-          id: v.id ?? null,
-          preview: safeSnippet(v.text ?? "", 300),
-          hasEmbedding: Array.isArray(emb),
-          embLength: Array.isArray(emb) ? emb.length : 0,
-        };
-      });
+      (resp as Record<string, unknown>).sample = (vectorData ?? [])
+        .slice(0, 6)
+        .map((v) => {
+          const emb = v.embedding ?? v.embeddings ?? v.vector ?? null;
+          return {
+            id: v.id ?? null,
+            preview: safeSnippet(v.text ?? "", 300),
+            hasEmbedding: Array.isArray(emb),
+            embLength: Array.isArray(emb) ? emb.length : 0,
+          };
+        });
     }
 
     return NextResponse.json(resp);
