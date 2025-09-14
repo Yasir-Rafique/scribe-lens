@@ -6,6 +6,8 @@ import crypto from "crypto";
 //import path from "path";
 import { processEmbeddings, Chunk } from "@/lib/embeddings";
 
+let pdfUploadCount = 0;
+
 export async function POST(req: Request) {
   try {
     const formData = await req.formData();
@@ -23,13 +25,13 @@ export async function POST(req: Request) {
     const text = await extractTextFromPDF(buffer);
 
     if (!text) {
-      console.warn("⚠️ No text extracted — PDF may be scanned or image-based");
+      console.warn("⚠️ No text extracted - PDF may be scanned or image-based");
       return NextResponse.json({
         success: true,
         rawChunksCount: 0,
         refinedChunksCount: 0,
         sample: [],
-        warning: "No text extracted — PDF may be scanned or image-based",
+        warning: "No text extracted - PDF may be scanned or image-based",
       });
     }
 
@@ -63,10 +65,12 @@ export async function POST(req: Request) {
     } catch (e) {
       console.error("Failed to launch embeddings job:", e);
     }
-
+    pdfUploadCount++;
+    console.log("📄 Total PDFs uploaded so far:", pdfUploadCount);
     return NextResponse.json({
       success: true,
       pdfId,
+      totalUploads: pdfUploadCount,
       rawChunksCount: rawChunks.length,
       refinedChunksCount: refinedChunks.length,
       sample: refinedChunks.slice(0, 3),

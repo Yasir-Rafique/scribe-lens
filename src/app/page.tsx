@@ -339,7 +339,6 @@ export default function Home() {
         body: formData,
       });
       const data = await res.json();
-      console.log("Upload response:", data);
 
       if (data?.success && data.pdfId) {
         const doc: UploadedDoc = { pdfId: data.pdfId, fileName: file.name };
@@ -553,7 +552,6 @@ export default function Home() {
       });
 
       const data = await res.json();
-      console.log("Ask response:", data);
 
       if (!data?.success) {
         const err = data?.error ?? "Unknown error from /api/ask";
